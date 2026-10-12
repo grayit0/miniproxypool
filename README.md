@@ -35,6 +35,44 @@
 
 ## 快速开始
 
+### 方式 0：本机直接跑（不用 Docker，最快看见效果）
+
+manager + Python 节点加起来只需要 `fastapi` / `uvicorn`（客户端再要 `requests`），
+所以机器上没有 Docker、没有 Go 也能把整套跑起来：
+
+```powershell
+# Windows
+.\scripts\run_local.ps1 start -n 3      # 起 manager + 3 个节点
+.\scripts\run_local.ps1 status          # 看进程和池子状态
+.\scripts\run_local.ps1 logs node1 -f   # 跟日志
+.\scripts\run_local.ps1 stop            # 全部停掉
+```
+
+```bash
+# Linux / macOS，或者手上已经有装好依赖的 Python
+python scripts/run_local.py start -n 3
+python scripts/run_local.py status
+python scripts/run_local.py stop
+```
+
+第一次跑时脚本会自己找一个装了依赖的解释器；找不到就用系统 python 建一个 `.venv`
+并 `pip install -r manager/requirements.txt -r client/requirements.txt`（只做一次）。
+想指定解释器：`$env:PROXYPOOL_PYTHON = "D:\venvs\pool\Scripts\python.exe"`，
+或 `python scripts/run_local.py start --python <解释器路径>`。
+
+跑起来之后（manager 默认 8000，节点代理 18801/18802/18803）：
+
+```bash
+python client/proxypool_client.py list                     # 列出池里的代理
+python client/proxypool_client.py pick                     # 拿一个地址
+python client/proxypool_client.py check                    # 经代理发一次请求
+python client/proxypool_client.py env --shell powershell   # 给当前 shell 设好代理
+```
+
+进程的 PID 和日志都在 `.localrun/`，节点状态落在 `manager/data/localrun.db`
+（想从零开始就删掉这个文件）。这条路用的是 **Python 参考节点**，比 Go 节点慢，
+只适合本机验证；要性能和容器编排请往下看方式 A / B。
+
 ### 前提：workflow scope（本仓库已配好，fork 时可能碰到）
 
 三个工作流已经在仓库里了，Actions 正常跑。但如果你 fork / 换机器后用**没有** `workflow`
@@ -307,6 +345,13 @@ CI 里跑的东西：
 
 ## 注意
 
+- **`check` / `bench` 的默认目标是 `https://httpbin.org/ip`**。在你的网络里访问不了
+  这个地址时，它们会一直 FAIL —— 那是探针目标不通，不是池子坏了。加 `--url` 换成
+  你能访问的目标即可，例如 `check --url https://www.example.com`。
+- **`list` 里的延迟列刚起步时数字偏大**（第一轮巡检赶上冷启动，可能上千毫秒），
+  等十几秒再看就回到真实水平了。这个值来自 manager 对节点代理端口的 TCP 探测。
+- 方式 0 跑的是 **Python 参考节点**，单节点几百并发就到头了；要吞吐就用 Go 节点
+  （方式 A / B，或者自己 `cd node-go && go build`）。
 - **node 是开放代理**：谁能连到 `18801` 就能拿它出网。生产环境请加出口白名单、
   在节点前面套 `Proxy-Authorization` 认证，并给管理接口设 `ADMIN_TOKEN`。
 - `/api/nodes`、`/api/upstreams` 之类的接口不设 `ADMIN_TOKEN` 时是完全公开的。
@@ -338,6 +383,8 @@ CI 里跑的东西：
 │   ├── e2e_local.py        # 本机端到端（不开 Docker）
 │   └── ci_smoke.py         # CI 冒烟：经代理访问外网
 ├── scripts/
+│   ├── run_local.py        # 本机免 Docker 起全套（manager + N 个节点）
+│   ├── run_local.ps1       # Windows 包装：自动找/建解释器，再交给 run_local.py
 │   ├── add_nodes.ps1       # 批量加节点容器（Windows）
 │   ├── codespace_up.sh     # Codespaces / 任意带 Docker 的机器上一键起全家桶
 │   ├── push_ghcr.sh        # 在容器里构建并推送镜像到 GHCR

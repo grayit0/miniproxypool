@@ -1,0 +1,61 @@
+name: e2e-go-node
+
+# 不需要 Docker：直接编译 Go 节点，再用 tests/e2e_local.py 拉起
+# manager + 两个 Go 节点 + 回显服务，验证注册/心跳/分发/明文转发/CONNECT/
+# 上游链式转发/report_bad/client 库。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "node-go/**"
+      - "manager/**"
+      - "client/**"
+      - "tests/**"
+      - ".github/workflows/e2e-go-node.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: go vet + 编译 Go 节点
+        working-directory: node-go
+        run: |
+          go vet ./...
+          go build -trimpath -o proxypool-node .
+          ./proxypool-node --version
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装 Python 依赖
+        run: python -m pip install --quiet -r manager/requirements.txt -r client/requirements.txt
+
+      - name: 端到端测试（Go 节点）
+        env:
+          E2E_NODE_ENGINE: go
+          PYTHONIOENCODING: utf-8
+        run: python tests/e2e_local.py
+
+      - name: 失败时打印节点日志
+        if: failure()
+        run: |
+          for f in .e2e-logs/*.log; do
+            echo "===== $f ====="
+            tail -n 60 "$f" || true
+          done

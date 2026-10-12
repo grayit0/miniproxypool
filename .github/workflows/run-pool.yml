@@ -1,0 +1,140 @@
+name: run-pool
+
+# 在 GitHub 的 runner 上把整套 proxypool 跑起来，并用 Cloudflare 快速隧道
+# 把 manager 暴露成一个临时公网地址 —— 相当于「用 GitHub 的容器服务托管 manager」。
+#
+# 诚实的边界（README 里也会写）：
+#   * GitHub runner 不是常驻主机，单个 job 最长 6 小时，job 结束后一切清零；
+#   * 隧道地址每次运行都会变（trycloudflare 的免费快速隧道）；
+#   * runner 上的 3 个 node 没有公网入口，所以真正能对外服务的是
+#     你自己机器/服务器上注册进来的节点（EGRESS_HOST 填那台机器的公网地址）。
+#
+# 想做到「几乎常驻」：把下面 schedule 的两行取消注释。注意这属于长时间
+# 占用 CI runner，请自行评估是否符合你所在环境的使用规则。
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "运行时长（分钟，1-350）"
+        required: false
+        default: "60"
+  # schedule:
+  #   - cron: "5 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: run-pool
+  cancel-in-progress: false
+
+jobs:
+  pool:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+      MINUTES: ${{ github.event.inputs.minutes || '60' }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 拉起 manager + 3 个 node
+        run: |
+          docker compose -f docker-compose.ghcr.yml pull
+          docker compose -f docker-compose.ghcr.yml up -d
+          docker compose -f docker-compose.ghcr.yml ps
+
+      - name: 等 manager 就绪
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              echo "manager 就绪"
+              curl -s http://127.0.0.1:8000/api/stats
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "manager 未就绪"
+          docker compose -f docker-compose.ghcr.yml logs --tail=80
+          exit 1
+
+      - name: 安装 cloudflared
+        run: |
+          curl -fsSL -o cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+
+      - name: 开公网隧道并把地址写进 Summary
+        run: |
+          nohup ./cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate > cloudflared.log 2>&1 &
+          url=""
+          for i in $(seq 1 60); do
+            url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | head -n1 || true)
+            [ -n "$url" ] && break
+            sleep 2
+          done
+
+          {
+            echo "## ProxyPool 已启动"
+            echo
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| manager 公网地址 | ${url:-未拿到（看 cloudflared.log）} |"
+            echo "| 运行时长 | ${MINUTES} 分钟 |"
+            echo
+            echo "### 把你自己机器上的节点注册进来"
+            echo
+            echo "runner 上的 3 个 node 只用于自检，没有公网入口；真正对外的出口要你自己提供。"
+            echo
+            echo '```bash'
+            echo "# 在你自己那台有公网 IP 的机器上执行"
+            echo "docker run -d --name proxypool-node --restart unless-stopped \\"
+            echo "  -p 18888:8888 \\"
+            echo "  -e MANAGER_URL=${url:-<上面的地址>} \\"
+            echo "  -e NODE_HOST=\$(hostname) -e NODE_NAME=mine \\"
+            echo "  -e EGRESS_HOST=<这台机器的公网IP或域名> -e EGRESS_PORT=18888 \\"
+            echo "  ${IMAGE_PREFIX}-node:latest"
+            echo '```'
+            echo
+            echo "### 客户端用法"
+            echo
+            echo '```bash'
+            echo "pip install requests"
+            echo "export PROXYPOOL_MANAGER=${url:-<上面的地址>}"
+            echo "python client/proxypool_client.py check"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$url" ]; then
+            echo "没拿到隧道地址，打印 cloudflared 日志："
+            tail -n 60 cloudflared.log
+          fi
+
+      - name: 保持运行
+        run: |
+          mins="$MINUTES"
+          case "$mins" in
+            ''|*[!0-9]*) mins=60 ;;
+          esac
+          [ "$mins" -lt 1 ] && mins=1
+          [ "$mins" -gt 350 ] && mins=350
+          echo "保持运行 $mins 分钟（job 上限 355 分钟）……"
+          sleep $((mins * 60))
+
+      - name: 收尾
+        if: always()
+        run: |
+          docker compose -f docker-compose.ghcr.yml logs --tail=50 || true
+          docker compose -f docker-compose.ghcr.yml down -v || true

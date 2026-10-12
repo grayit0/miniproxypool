@@ -35,17 +35,27 @@
 
 ## 快速开始
 
-### 前提：让 GitHub Actions 能跑起来（一次性）
+### 前提：workflow scope（本仓库已配好，fork 时可能碰到）
 
-`.github/workflows/` 下的文件只能由带 `workflow` scope 的凭证推送。如果 push 时报：
+三个工作流已经在仓库里了，Actions 正常跑。但如果你 fork / 换机器后用**没有** `workflow`
+scope 的凭证去推 `.github/workflows/`，会被 GitHub 拦下来。报错有两种形态，都别误判成网络问题：
 
 ```
+# git push
 refusing to allow a Personal Access Token to create or update workflow
 `.github/workflows/build-images.yml` without `workflow` scope
+
+# Contents / Git Data API —— 注意是 404，不是 403
+HTTP 404
 ```
 
-或者 Contents / Git Data API 对 `.github/workflows/` 直接返回 404，那就是 scope 不够。
-补上（二选一）：
+核实自己 token 的 scope：
+
+```bash
+curl -D - -H "Authorization: token <PAT>" https://api.github.com/user | grep -i oauth-scopes
+```
+
+补 scope（二选一）：
 
 - **classic PAT**：Settings → Developer settings → Personal access tokens → Tokens (classic)
   → 编辑现有 token → 勾上 `workflow` → Update。
@@ -61,9 +71,18 @@ refusing to allow a Personal Access Token to create or update workflow
 
 ### 方式 A：直接用 GitHub 上构建好的镜像（推荐）
 
-镜像由 `.github/workflows/build-images.yml` 在每次 push 到 `main` 时自动构建并推送到 GHCR。
-GitHub Packages 的镜像默认是私有的，想公开访问就去
-`https://github.com/users/grayit0/packages/container/<包名>/settings` 把可见性改成 Public。
+镜像由 `.github/workflows/build-images.yml` 在每次 push 到 `main` 时自动构建并推送到 GHCR，
+目前两个包都已经是 **public**，不用登录就能直接拉：
+
+```
+ghcr.io/grayit0/miniproxypool-manager:latest
+ghcr.io/grayit0/miniproxypool-node:latest
+```
+
+可用标签：`latest`、`sha-<短 sha>`、以及 `v*` 形式的 git tag。
+（如果哪天你把包改回私有，或者自己 fork 了一份，那就先
+`echo <PAT> | docker login ghcr.io -u <用户名> --password-stdin`，
+或去 `https://github.com/users/<用户名>/packages/container/<包名>/settings` 改可见性。）
 
 ```bash
 git clone https://github.com/grayit0/miniproxypool.git
@@ -281,10 +300,10 @@ CI 里跑的东西：
 | `build-images.yml` | 构建并推送 manager/node 镜像到 GHCR；非 PR 事件还会把镜像真跑起来，用客户端经代理访问外网做冒烟 |
 | `run-pool.yml` | 在 runner 上托管 manager + 临时公网隧道（手动触发为主） |
 
-> ⚠️ 这三个工作流目前**还没推到 GitHub**（推送所用的 token 缺 `workflow` scope），
-> 所以 Actions 页面上还看不到它们、GHCR 里也还没有镜像。
-> 补推方式见上面「前提：让 GitHub Actions 能跑起来」。
-> 在补推之前，请用**方式 B**（本地构建）或**方式 D**（Codespaces）。
+> 这三个工作流已在仓库里。push 到 `main` 会自动触发 `build-images` 与 `e2e-go-node`
+> （前者构建并推送 GHCR 镜像后还会用真镜像跑一遍冒烟）；`run-pool` 需要到 Actions
+> 页面手动触发。工作流需要 `workflow` scope 才能推，原理见上面「前提」。
+> 首次构建完成后 GHCR 里就有镜像了，**方式 A** 才可用；在那之前请用**方式 B** 或**方式 D**。
 
 ## 注意
 

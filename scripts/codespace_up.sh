@@ -54,10 +54,14 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 say "等 3 个 node 通过 manager 的心跳探测"
+alive=0
 for _ in $(seq 1 30); do
-  online=$(curl -fsS "http://127.0.0.1:${MANAGER_PORT}/api/stats" 2>/dev/null \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("online", 0))' 2>/dev/null || echo 0)
-  [ "${online:-0}" -ge 1 ] && break
+  alive=$(curl -fsS "http://127.0.0.1:${MANAGER_PORT}/api/stats" 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("nodes", {}).get("alive", 0))' 2>/dev/null \
+    || echo 0)
+  if [ "${alive:-0}" -ge 1 ]; then
+    break
+  fi
   sleep 2
 done
 

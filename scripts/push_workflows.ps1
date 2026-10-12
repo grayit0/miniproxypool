@@ -63,9 +63,9 @@ $api = "https://api.github.com/repos/$Owner/$Repo/contents"
 # 先自检 scope，避免拿到 404 之后还要猜原因。
 try {
     $probe = Invoke-WebRequest -Uri "https://api.github.com/user" -Headers $headers -Method GET -UseBasicParsing
-    $scopes = $probe.Headers["X-OAuth-Scopes"]
-    Write-Host "token scopes: $scopes"
-    if ($scopes -and ($scopes -notmatch "workflow")) {
+    $scopes = [string]$probe.Headers["X-OAuth-Scopes"]
+    Write-Host ("token scopes: " + $scopes)
+    if ($scopes.Length -gt 0 -and $scopes -notmatch "workflow") {
         Write-Warning "这个 token 的 scope 里没有 workflow，推送 .github/workflows/ 会失败（GitHub 会返回 404）。"
     }
 }
@@ -83,18 +83,20 @@ foreach ($f in $files) {
 
     $sha = $null
     try {
-        $existing = Invoke-RestMethod -Uri "$uri`?ref=$Branch" -Headers $headers -Method GET
-        $sha = $existing.sha
-        Write-Host ("{0}  -> 远端已存在，将更新（sha {1}）" -f $f.Name, $sha.Substring(0, 7))
+        $getUri = $uri + "?ref=" + $Branch
+        $existing = Invoke-RestMethod -Uri $getUri -Headers $headers -Method GET
+        $sha = [string]$existing.sha
+        $sha7 = $sha.Substring(0, 7)
+        Write-Host ($f.Name + "  -> 远端已存在，将更新 (sha " + $sha7 + ")")
     }
     catch {
-        $code = $null
+        $code = 0
         if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
         if ($code -eq 404) {
-            Write-Host ("{0}  -> 远端不存在，将新建" -f $f.Name)
+            Write-Host ($f.Name + "  -> 远端不存在，将新建")
         }
         else {
-            Write-Warning ("{0}  -> 读取失败（HTTP {1}）：{2}" -f $f.Name, $code, $_.Exception.Message)
+            Write-Warning ($f.Name + "  -> 读取失败 (HTTP " + $code + ")：" + $_.Exception.Message)
         }
     }
 
@@ -112,7 +114,8 @@ foreach ($f in $files) {
         $res = Invoke-RestMethod -Uri $uri -Headers $headers -Method PUT `
             -ContentType "application/json; charset=utf-8" `
             -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
-        Write-Host ("    OK  提交 {0}" -f $res.commit.sha.Substring(0, 7)) -ForegroundColor Green
+        $commit7 = ([string]$res.commit.sha).Substring(0, 7)
+        Write-Host ("    OK   提交 " + $commit7) -ForegroundColor Green
         $ok++
     }
     catch {

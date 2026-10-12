@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proxypool-client"
+version = "2.0.0"
+description = "ProxyPool 客户端：从 manager 取代理并开箱即用（requests 轮换会话 + CLI）"
+requires-python = ">=3.8"
+dependencies = ["requests>=2.25"]
+
+[project.scripts]
+proxypool = "proxypool_client:main"
+
+[tool.setuptools]
+py-modules = ["proxypool_client"]

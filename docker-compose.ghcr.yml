@@ -1,0 +1,93 @@
+# 直接用 GitHub Container Registry 上构建好的镜像跑，本地不需要 Go / Python 工具链。
+#
+#   docker compose -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.ghcr.yml up -d
+#
+# 镜像由 .github/workflows/build-images.yml 在每次 push 到 main 时自动构建并推送：
+#   ghcr.io/<owner>/<repo>-manager:latest
+#   ghcr.io/<owner>/<repo>-node:latest
+#
+# 可覆盖的变量（也可以写在同目录的 .env 里）：
+#   IMAGE_PREFIX=ghcr.io/grayit0/miniproxypool
+#   IMAGE_TAG=latest            # 也可以填 sha-xxxxxxx 或 v1.0.0
+
+name: proxypool-ghcr
+
+x-node-common: &node-common
+  image: ${IMAGE_PREFIX:-ghcr.io/grayit0/miniproxypool}-node:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  depends_on:
+    manager:
+      condition: service_healthy
+
+services:
+  manager:
+    image: ${IMAGE_PREFIX:-ghcr.io/grayit0/miniproxypool}-manager:${IMAGE_TAG:-latest}
+    container_name: proxypool-manager
+    hostname: manager
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DB_PATH: /data/proxypool.db
+      HEARTBEAT_INTERVAL: "10"
+      NODE_TTL: "45"
+      FAIL_THRESHOLD: "2"
+      CHECK_INTERVAL: "15"
+      CHECK_TIMEOUT: "4"
+      CHECK_UPSTREAMS: "1"
+      LOG_LEVEL: INFO
+      # ADMIN_TOKEN: "change-me"
+    volumes:
+      - manager-data:/data
+
+  node1:
+    <<: *node-common
+    container_name: proxypool-node1
+    hostname: node1
+    environment:
+      MANAGER_URL: http://manager:8000
+      NODE_HOST: node1
+      NODE_NAME: node1
+      PROXY_PORT: "8888"
+      ADMIN_PORT: "8000"
+      EGRESS_HOST: ${NODE1_EGRESS_HOST:-127.0.0.1}
+      EGRESS_PORT: "18801"
+      REGION: ${NODE_REGION:-local}
+    ports:
+      - "18801:8888"
+
+  node2:
+    <<: *node-common
+    container_name: proxypool-node2
+    hostname: node2
+    environment:
+      MANAGER_URL: http://manager:8000
+      NODE_HOST: node2
+      NODE_NAME: node2
+      PROXY_PORT: "8888"
+      ADMIN_PORT: "8000"
+      EGRESS_HOST: ${NODE2_EGRESS_HOST:-127.0.0.1}
+      EGRESS_PORT: "18802"
+      REGION: ${NODE_REGION:-local}
+    ports:
+      - "18802:8888"
+
+  node3:
+    <<: *node-common
+    container_name: proxypool-node3
+    hostname: node3
+    environment:
+      MANAGER_URL: http://manager:8000
+      NODE_HOST: node3
+      NODE_NAME: node3
+      PROXY_PORT: "8888"
+      ADMIN_PORT: "8000"
+      EGRESS_HOST: ${NODE3_EGRESS_HOST:-127.0.0.1}
+      EGRESS_PORT: "18803"
+      REGION: ${NODE_REGION:-local}
+    ports:
+      - "18803:8888"
+
+volumes:
+  manager-data:

@@ -1,0 +1,124 @@
+# ProxyPool：一个 manager + N 个 node，全部跑在 Docker 里（本地从源码构建）。
+#
+#   docker compose up -d --build
+#   docker compose ps
+#   curl http://127.0.0.1:8000/api/stats
+#
+# node 想扩容时不要改这个文件，直接用 scripts/add_nodes.ps1，
+# 或者用文件末尾注释里的 docker run 命令。
+#
+# 想用 GitHub 上构建好的镜像（不本地编译）：用 docker-compose.ghcr.yml
+
+name: proxypool
+
+x-node-common: &node-common
+  build:
+    context: ./node-go
+  image: proxypool-node
+  restart: unless-stopped
+  depends_on:
+    manager:
+      condition: service_healthy
+
+services:
+  # ------------------------------------------------------------ 注册中心
+  manager:
+    build:
+      context: ./manager
+    image: proxypool-manager
+    container_name: proxypool-manager
+    hostname: manager
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DB_PATH: /data/proxypool.db
+      HEARTBEAT_INTERVAL: "10"      # 下发给节点的心跳周期（秒）
+      NODE_TTL: "45"                # 多久没心跳算掉线（秒）
+      FAIL_THRESHOLD: "2"           # 连续探测失败几次判定下线
+      CHECK_INTERVAL: "15"          # 巡检周期（秒）
+      CHECK_TIMEOUT: "4"
+      CHECK_URL: "http://httpbin.org/ip"
+      CHECK_UPSTREAMS: "1"          # 拿到共享上游时是否自动校验
+      LOG_LEVEL: INFO
+      # ADMIN_TOKEN: "change-me"    # 打开后，/api/nodes、/api/upstreams 需要带 X-Admin-Token
+    volumes:
+      - manager-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # ------------------------------------------------------------ 代理节点（Go）
+  node1:
+    <<: *node-common
+    container_name: proxypool-node1
+    hostname: node1
+    environment:
+      MANAGER_URL: http://manager:8000
+      NODE_HOST: node1              # manager 在同一 docker 网络里用这个名字探测
+      NODE_NAME: node1
+      PROXY_PORT: "8888"            # 容器内监听端口
+      ADMIN_PORT: "8000"
+      EGRESS_HOST: "127.0.0.1"      # 客户端（跑在宿主机）该用什么地址访问
+      EGRESS_PORT: "18801"          # 就是下面映射到宿主机的端口
+      REGION: local
+      MAX_CONNS: "512"
+      LOG_LEVEL: INFO
+      # UPSTREAMS: "http://1.2.3.4:8080,http://5.6.7.8:3128"   # 可选：本节点自己的上游链
+    ports:
+      - "18801:8888"
+
+  node2:
+    <<: *node-common
+    container_name: proxypool-node2
+    hostname: node2
+    environment:
+      MANAGER_URL: http://manager:8000
+      NODE_HOST: node2
+      NODE_NAME: node2
+      PROXY_PORT: "8888"
+      ADMIN_PORT: "8000"
+      EGRESS_HOST: "127.0.0.1"
+      EGRESS_PORT: "18802"
+      REGION: local
+      LOG_LEVEL: INFO
+    ports:
+      - "18802:8888"
+
+  node3:
+    <<: *node-common
+    container_name: proxypool-node3
+    hostname: node3
+    environment:
+      MANAGER_URL: http://manager:8000
+      NODE_HOST: node3
+      NODE_NAME: node3
+      PROXY_PORT: "8888"
+      ADMIN_PORT: "8000"
+      EGRESS_HOST: "127.0.0.1"
+      EGRESS_PORT: "18803"
+      REGION: local
+      LOG_LEVEL: INFO
+    ports:
+      - "18803:8888"
+
+volumes:
+  manager-data:
+
+# ---------------------------------------------------------------------------
+# 手动加更多节点（不重启 compose）：
+#
+#   docker run -d --name node4 --hostname node4 --network proxypool_default \
+#     -e MANAGER_URL=http://manager:8000 -e NODE_HOST=node4 -e NODE_NAME=node4 \
+#     -e PROXY_PORT=8888 -e EGRESS_HOST=127.0.0.1 -e EGRESS_PORT=18804 \
+#     -p 18804:8888 --restart unless-stopped proxypool-node
+#
+# 或者直接用脚本： .\scripts\add_nodes.ps1 -Count 3 -StartHostPort 18804
+# ---------------------------------------------------------------------------

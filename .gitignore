@@ -1,0 +1,26 @@
+# 运行时产物
+.e2e-logs/
+manager/data/
+*.db
+
+# 编译产物
+node-go/proxypool-node
+node-go/proxypool-node.exe
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# 本地配置
+.env
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

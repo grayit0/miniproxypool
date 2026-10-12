@@ -35,6 +35,30 @@
 
 ## 快速开始
 
+### 前提：让 GitHub Actions 能跑起来（一次性）
+
+`.github/workflows/` 下的文件只能由带 `workflow` scope 的凭证推送。如果 push 时报：
+
+```
+refusing to allow a Personal Access Token to create or update workflow
+`.github/workflows/build-images.yml` without `workflow` scope
+```
+
+或者 Contents / Git Data API 对 `.github/workflows/` 直接返回 404，那就是 scope 不够。
+补上（二选一）：
+
+- **classic PAT**：Settings → Developer settings → Personal access tokens → Tokens (classic)
+  → 编辑现有 token → 勾上 `workflow` → Update。
+- **fine-grained PAT**：新建 token → Repository permissions → **Workflows = Read and write**。
+
+拿到新 token 后一条命令补推这三个文件：
+
+```powershell
+.\scripts\push_workflows.ps1 -Token <带 workflow scope 的 token>
+```
+
+不想折腾 scope 也行 —— 直接看**方式 D**，那条路完全不依赖 Actions。
+
 ### 方式 A：直接用 GitHub 上构建好的镜像（推荐）
 
 镜像由 `.github/workflows/build-images.yml` 在每次 push 到 `main` 时自动构建并推送到 GHCR。
@@ -68,6 +92,33 @@ python client/proxypool_client.py list
 job 结束即清零；隧道地址每次运行都会变；runner 上的 node 没有公网入口，
 真正对外服务的是你自己注册进去的节点。想做到「几乎常驻」需要把工作流里
 `schedule` 那两行取消注释（默认注释掉了），请自行评估是否符合你所在环境的使用规则。
+
+### 方式 D：用 GitHub Codespaces（不需要 workflow scope）
+
+仓库里带了 `.devcontainer/devcontainer.json`：在 GitHub 页面上点
+**Code → Codespaces → Create codespace on main**，容器起来后会自动执行
+`scripts/codespace_up.sh`，把 manager + 3 个 Go node 直接跑起来（Codespace 自带 Docker）。
+
+然后在 **PORTS** 面板把 `8000` 的 Visibility 改成 **Public**，
+就得到一个形如 `https://<codespace-name>-8000.app.github.dev` 的 manager 地址：
+
+```bash
+export PROXYPOOL_MANAGER=https://<codespace-name>-8000.app.github.dev
+python client/proxypool_client.py check
+python client/proxypool_client.py env
+```
+
+想顺便把镜像发到 GHCR（用 Codespaces 的容器算力当构建机），执行：
+
+```bash
+export GHCR_TOKEN=<带 write:packages 的 PAT>
+bash scripts/push_ghcr.sh
+```
+
+> 别忘了：Codespace 里的 node 只能在 Codespace 内部访问。要让外部客户端真正走代理，
+> 需要把你自己那台有公网入口的机器上的 node 注册到这个 manager
+> （`MANAGER_URL` 填上面那个公开地址，`EGRESS_HOST` 填那台机器的公网 IP/域名）。
+> Codespace 停掉之后一切清零。
 
 ## 客户端：开箱即用
 
@@ -230,6 +281,11 @@ CI 里跑的东西：
 | `build-images.yml` | 构建并推送 manager/node 镜像到 GHCR；非 PR 事件还会把镜像真跑起来，用客户端经代理访问外网做冒烟 |
 | `run-pool.yml` | 在 runner 上托管 manager + 临时公网隧道（手动触发为主） |
 
+> ⚠️ 这三个工作流目前**还没推到 GitHub**（推送所用的 token 缺 `workflow` scope），
+> 所以 Actions 页面上还看不到它们、GHCR 里也还没有镜像。
+> 补推方式见上面「前提：让 GitHub Actions 能跑起来」。
+> 在补推之前，请用**方式 B**（本地构建）或**方式 D**（Codespaces）。
+
 ## 注意
 
 - **node 是开放代理**：谁能连到 `18801` 就能拿它出网。生产环境请加出口白名单、
@@ -262,7 +318,12 @@ CI 里跑的东西：
 ├── tests/
 │   ├── e2e_local.py        # 本机端到端（不开 Docker）
 │   └── ci_smoke.py         # CI 冒烟：经代理访问外网
-├── scripts/add_nodes.ps1   # 批量加节点容器
+├── scripts/
+│   ├── add_nodes.ps1       # 批量加节点容器（Windows）
+│   ├── codespace_up.sh     # Codespaces / 任意带 Docker 的机器上一键起全家桶
+│   ├── push_ghcr.sh        # 在容器里构建并推送镜像到 GHCR
+│   └── push_workflows.ps1  # 用带 workflow scope 的 token 补推 .github/workflows/
+├── .devcontainer/          # Codespaces：自带 Docker，起来就能跑
 ├── docker-compose.yml      # 本地从源码构建
 ├── docker-compose.ghcr.yml # 直接使用 GHCR 镜像
 └── .github/workflows/      # build-images / e2e-go-node / run-pool

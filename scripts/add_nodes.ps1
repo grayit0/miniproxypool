@@ -1,4 +1,4 @@
-# 给 proxypool 批量补 node 容器（不重启 compose）。
+﻿# 给 proxypool 批量补 node 容器（不重启 compose）。
 #
 # 用法（在仓库根目录执行）：
 #   .\scripts\add_nodes.ps1 -Count 3

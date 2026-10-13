@@ -359,9 +359,18 @@ CI 里跑的东西：
   等十几秒再看就回到真实水平了。这个值来自 manager 对节点代理端口的 TCP 探测。
 - 方式 0 跑的是 **Python 参考节点**，单节点几百并发就到头了；要吞吐就用 Go 节点
   （方式 A / B，或者自己 `cd node-go && go build`）。
-- **node 是开放代理**：谁能连到 `18801` 就能拿它出网。生产环境请加出口白名单、
-  在节点前面套 `Proxy-Authorization` 认证，并给管理接口设 `ADMIN_TOKEN`。
-- `/api/nodes`、`/api/upstreams` 之类的接口不设 `ADMIN_TOKEN` 时是完全公开的。
+- **鉴权只做了一半，默认配置下没有任何一层是开着的**。下面是完整现状：
+
+  | 接口 | 现状 | 怎么开 |
+  | --- | --- | --- |
+  | node 代理端口（`18801`） | **完全没有认证**，连上就能用你的 IP 出网 | 目前只能靠防火墙白名单 / SSH 隧道 / 前置反代套 `Proxy-Authorization` |
+  | `/api/proxies`、`/api/proxy` | **恒公开**（拿到节点列表 ≈ 拿到代理） | 没有开关，只能限制来源 IP |
+  | `/api/stats`、`/health`、`/docs` | 恒公开 | 同上 |
+  | `/api/nodes`、`/api/upstreams`、`/api/nodes/cleanup` | 设了 `ADMIN_TOKEN` 才校验 `X-Admin-Token`，**默认不校验** | 加 `-e ADMIN_TOKEN=...` |
+  | `/api/nodes/register`、`/heartbeat`、`/report_bad` | 恒公开（节点自己调用） | 把 `8000` 只放给节点机器和你的客户端 |
+
+  实践结论：**`8000` 和 `18801` 都别对公网敞开**。`ADMIN_TOKEN` 只保护那三个运维接口，
+  它不保护 `/api/proxies`，所以「设了 token 就安全了」是错的。
 - manager 的 SQLite 挂在 `manager-data` 卷里，`docker compose down -v` 会连数据一起删。
 - **不要把池子里的节点塞进共享上游池**。共享上游是给「外部代理」用的；把池内节点塞进去，
   两个节点可能互相把对方当上游而形成环路（指向自己的那一份会被自动过滤，但互相指向不会）。

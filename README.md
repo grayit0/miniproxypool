@@ -35,6 +35,13 @@
 
 ## 快速开始
 
+> **要在自己的服务器上部署？** 直接看 **[DEPLOY.md](DEPLOY.md)** —— 单机 / 多机两套可直接复制的命令，
+> 端口与 `NODE_HOST` / `EGRESS_HOST` 的填法、安全组怎么开、以及怎么把代理接进现有的
+> `requests.post(...)`（含 `examples/requests_embed.py`）。
+>
+> 一句话结论：**`proxies` 里 `http` 和 `https` 两个键都要给**。只写 `http` 键时，
+> requests 对 `https://` 目标会**静默直连**，不报错、也不走代理。
+
 ### 方式 0：本机直接跑（不用 Docker，最快看见效果）
 
 manager + Python 节点加起来只需要 `fastapi` / `uvicorn`（客户端再要 `requests`），
@@ -382,6 +389,8 @@ CI 里跑的东西：
 ├── tests/
 │   ├── e2e_local.py        # 本机端到端（不开 Docker）
 │   └── ci_smoke.py         # CI 冒烟：经代理访问外网
+├── examples/
+│   └── requests_embed.py   # 把代理接进 requests.post 的可复制示例 + 自检
 ├── scripts/
 │   ├── run_local.py        # 本机免 Docker 起全套（manager + N 个节点）
 │   ├── run_local.ps1       # Windows 包装：自动找/建解释器，再交给 run_local.py
@@ -390,6 +399,7 @@ CI 里跑的东西：
 │   ├── push_ghcr.sh        # 在容器里构建并推送镜像到 GHCR
 │   └── push_workflows.ps1  # 用带 workflow scope 的 token 补推 .github/workflows/
 ├── .devcontainer/          # Codespaces：自带 Docker，起来就能跑
+├── DEPLOY.md               # 远端部署指南（单机 / 多机 + 安全 + 接入 requests）
 ├── docker-compose.yml      # 本地从源码构建
 ├── docker-compose.ghcr.yml # 直接使用 GHCR 镜像
 └── .github/workflows/      # build-images / e2e-go-node / run-pool

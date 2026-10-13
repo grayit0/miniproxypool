@@ -32,7 +32,7 @@
             headers=headers,
             json_data=json_data,
             timeout=4,
-            proxy="http://<服务器公网IP>:8000",   # manager 地址
+            manager="http://<服务器公网IP>:8000",  # 注意是 manager=，填 manager 的 8000
             sticky=True,                          # 见下方「粘性」说明
         )
 
